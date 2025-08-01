@@ -8,8 +8,13 @@
 (define-constant err-not-expired (err u106))
 (define-constant err-empty-bundle (err u107))
 (define-constant err-invalid-price (err u108))
+(define-constant err-already-retired (err u109))
+(define-constant err-not-owner (err u110))
 (define-data-var next-carbon-credit-id uint u1)
 (define-data-var temp-buyer (optional principal) none)
+(define-data-var next-retirement-id uint u1)
+(define-data-var temp-purpose (string-ascii 128) "")
+(define-data-var temp-certificate (optional (string-ascii 64)) none)
 
 (define-map carbon-credits
     uint
@@ -21,6 +26,7 @@
         validity-period: uint,
         buyer: (optional principal),
         transferred: bool,
+        retired: bool,
     }
 )
 
@@ -35,6 +41,28 @@
 (define-map buyer-credits
     principal
     (list 100 uint)
+)
+
+(define-map credit-retirements
+    uint
+    {
+        credit-id: uint,
+        retiree: principal,
+        retirement-date: uint,
+        purpose: (string-ascii 128),
+        co2-amount: uint,
+        certificate-hash: (optional (string-ascii 64)),
+    }
+)
+
+(define-map user-retirement-summary
+    principal
+    {
+        total-retired-credits: uint,
+        total-co2-offset: uint,
+        first-retirement: uint,
+        last-retirement: uint,
+    }
 )
 
 (define-read-only (get-carbon-credit (credit-id uint))
@@ -72,6 +100,7 @@
             validity-period: validity-period,
             buyer: none,
             transferred: false,
+            retired: false,
         })
         (var-set next-carbon-credit-id (+ credit-id u1))
         (ok credit-id)
@@ -709,6 +738,123 @@
             (> (get total-ratings summary) u0)
             (>= (get average-quality summary) u75)
             (>= (get average-verification summary) u3)
+        )
+        false
+    )
+)
+
+(define-public (retire-carbon-credit
+        (credit-id uint)
+        (purpose (string-ascii 128))
+        (certificate-hash (optional (string-ascii 64)))
+    )
+    (let (
+            (credit (unwrap! (map-get? carbon-credits credit-id) err-not-found))
+            (retirement-id (var-get next-retirement-id))
+        )
+        (asserts! (is-some (get buyer credit)) err-not-owner)
+        (asserts! (is-eq (unwrap-panic (get buyer credit)) tx-sender)
+            err-not-owner
+        )
+        (asserts! (not (get retired credit)) err-already-retired)
+        (asserts! (not (is-credit-expired credit-id)) err-expired)
+        (map-set carbon-credits credit-id (merge credit { retired: true }))
+        (map-set credit-retirements retirement-id {
+            credit-id: credit-id,
+            retiree: tx-sender,
+            retirement-date: stacks-block-height,
+            purpose: purpose,
+            co2-amount: (get amount credit),
+            certificate-hash: certificate-hash,
+        })
+        (update-retirement-summary tx-sender (get amount credit))
+        (var-set next-retirement-id (+ retirement-id u1))
+        (ok retirement-id)
+    )
+)
+
+(define-private (retire-single-credit (credit-id uint))
+    (retire-carbon-credit credit-id (var-get temp-purpose)
+        (var-get temp-certificate)
+    )
+)
+
+(define-public (batch-retire-credits
+        (credit-ids (list 10 uint))
+        (purpose (string-ascii 128))
+        (certificate-hash (optional (string-ascii 64)))
+    )
+    (begin
+        (var-set temp-purpose purpose)
+        (var-set temp-certificate certificate-hash)
+        (map retire-single-credit credit-ids)
+        (ok true)
+    )
+)
+
+(define-private (update-retirement-summary
+        (user principal)
+        (co2-amount uint)
+    )
+    (let ((current-summary (default-to {
+            total-retired-credits: u0,
+            total-co2-offset: u0,
+            first-retirement: stacks-block-height,
+            last-retirement: stacks-block-height,
+        }
+            (map-get? user-retirement-summary user)
+        )))
+        (map-set user-retirement-summary user {
+            total-retired-credits: (+ (get total-retired-credits current-summary) u1),
+            total-co2-offset: (+ (get total-co2-offset current-summary) co2-amount),
+            first-retirement: (if (> (get total-retired-credits current-summary) u0)
+                (get first-retirement current-summary)
+                stacks-block-height
+            ),
+            last-retirement: stacks-block-height,
+        })
+        true
+    )
+)
+
+(define-read-only (get-retirement-record (retirement-id uint))
+    (match (map-get? credit-retirements retirement-id)
+        retirement (ok retirement)
+        err-not-found
+    )
+)
+
+(define-read-only (get-user-retirement-summary (user principal))
+    (match (map-get? user-retirement-summary user)
+        summary (ok summary)
+        err-not-found
+    )
+)
+
+(define-read-only (is-credit-retired (credit-id uint))
+    (match (map-get? carbon-credits credit-id)
+        credit (get retired credit)
+        false
+    )
+)
+
+(define-read-only (get-total-co2-offset (user principal))
+    (match (map-get? user-retirement-summary user)
+        summary (ok (get total-co2-offset summary))
+        (ok u0)
+    )
+)
+
+(define-read-only (can-retire-credit
+        (credit-id uint)
+        (user principal)
+    )
+    (match (map-get? carbon-credits credit-id)
+        credit (and
+            (is-some (get buyer credit))
+            (is-eq (unwrap-panic (get buyer credit)) user)
+            (not (get retired credit))
+            (not (is-credit-expired credit-id))
         )
         false
     )
