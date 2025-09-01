@@ -859,3 +859,158 @@
         false
     )
 )
+
+(define-constant err-escrow-not-found (err u111))
+(define-constant err-escrow-already-settled (err u112))
+(define-constant err-escrow-not-expired (err u113))
+(define-constant err-wrong-buyer (err u114))
+(define-constant err-wrong-seller (err u115))
+
+(define-data-var next-escrow-id uint u1)
+
+(define-map escrow-agreements
+    uint
+    {
+        credit-id: uint,
+        buyer: principal,
+        seller: principal,
+        amount: uint,
+        created-block: uint,
+        expiry-block: uint,
+        status: uint,
+        settled-block: (optional uint),
+    }
+)
+
+(define-map escrow-balances
+    uint
+    uint
+)
+
+(define-map user-escrow-history
+    principal
+    (list 30 uint)
+)
+
+(define-public (create-escrow
+        (credit-id uint)
+        (seller principal)
+        (duration uint)
+    )
+    (let (
+            (credit (unwrap! (map-get? carbon-credits credit-id) err-not-found))
+            (escrow-id (var-get next-escrow-id))
+        )
+        (asserts! (is-eq (get issuer credit) seller) err-unauthorized)
+        (asserts! (is-none (get buyer credit)) err-already-exists)
+        (asserts! (not (get transferred credit)) err-already-exists)
+        (asserts! (>= (stx-get-balance tx-sender) (get price credit))
+            err-insufficient-funds
+        )
+        (asserts! (> duration u0) err-invalid-price)
+        (map-set escrow-agreements escrow-id {
+            credit-id: credit-id,
+            buyer: tx-sender,
+            seller: seller,
+            amount: (get price credit),
+            created-block: stacks-block-height,
+            expiry-block: (+ stacks-block-height duration),
+            status: u1,
+            settled-block: none,
+        })
+        (map-set escrow-balances escrow-id (get price credit))
+        (var-set next-escrow-id (+ escrow-id u1))
+        (ok escrow-id)
+    )
+)
+
+(define-public (complete-escrow (escrow-id uint))
+    (let ((escrow (unwrap! (map-get? escrow-agreements escrow-id) err-escrow-not-found)))
+        (asserts! (is-eq (get seller escrow) tx-sender) err-wrong-seller)
+        (asserts! (is-eq (get status escrow) u1) err-escrow-already-settled)
+        (asserts! (< stacks-block-height (get expiry-block escrow)) err-expired)
+        (let ((credit (unwrap! (map-get? carbon-credits (get credit-id escrow))
+                err-not-found
+            )))
+            (map-set carbon-credits (get credit-id escrow)
+                (merge credit {
+                    buyer: (some (get buyer escrow)),
+                    transferred: true,
+                })
+            )
+            (map-set escrow-agreements escrow-id
+                (merge escrow {
+                    status: u2,
+                    settled-block: (some stacks-block-height),
+                })
+            )
+            (ok true)
+        )
+    )
+)
+
+(define-public (cancel-escrow (escrow-id uint))
+    (let ((escrow (unwrap! (map-get? escrow-agreements escrow-id) err-escrow-not-found)))
+        (asserts!
+            (or
+                (is-eq (get buyer escrow) tx-sender)
+                (>= stacks-block-height (get expiry-block escrow))
+            )
+            err-unauthorized
+        )
+        (asserts! (is-eq (get status escrow) u1) err-escrow-already-settled)
+        (map-set escrow-agreements escrow-id
+            (merge escrow {
+                status: u3,
+                settled-block: (some stacks-block-height),
+            })
+        )
+        (ok true)
+    )
+)
+
+(define-public (claim-escrow-refund (escrow-id uint))
+    (let ((escrow (unwrap! (map-get? escrow-agreements escrow-id) err-escrow-not-found)))
+        (asserts! (is-eq (get buyer escrow) tx-sender) err-wrong-buyer)
+        (asserts! (is-eq (get status escrow) u3) err-escrow-already-settled)
+        (ok true)
+    )
+)
+
+(define-read-only (get-escrow-agreement (escrow-id uint))
+    (match (map-get? escrow-agreements escrow-id)
+        escrow (ok escrow)
+        err-escrow-not-found
+    )
+)
+
+(define-read-only (get-escrow-balance (escrow-id uint))
+    (match (map-get? escrow-balances escrow-id)
+        balance (ok balance)
+        (ok u0)
+    )
+)
+
+(define-read-only (is-escrow-active (escrow-id uint))
+    (match (map-get? escrow-agreements escrow-id)
+        escrow (and
+            (is-eq (get status escrow) u1)
+            (< stacks-block-height (get expiry-block escrow))
+        )
+        false
+    )
+)
+
+(define-read-only (can-complete-escrow
+        (escrow-id uint)
+        (user principal)
+    )
+    (match (map-get? escrow-agreements escrow-id)
+        escrow (and
+            (is-eq (get seller escrow) user)
+            (is-eq (get status escrow) u1)
+            (< stacks-block-height (get expiry-block escrow))
+        )
+        false
+    )
+)
