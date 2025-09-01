@@ -1,4 +1,5 @@
 (define-constant contract-owner tx-sender)
+
 (define-constant err-owner-only (err u100))
 (define-constant err-not-found (err u101))
 (define-constant err-already-exists (err u102))
@@ -10,9 +11,18 @@
 (define-constant err-invalid-price (err u108))
 (define-constant err-already-retired (err u109))
 (define-constant err-not-owner (err u110))
+(define-constant err-escrow-not-found (err u111))
+(define-constant err-escrow-already-settled (err u112))
+(define-constant err-escrow-not-expired (err u113))
+(define-constant err-wrong-buyer (err u114))
+(define-constant err-wrong-seller (err u115))
 (define-data-var next-carbon-credit-id uint u1)
-(define-data-var temp-buyer (optional principal) none)
+(define-data-var next-bundle-id uint u1)
+(define-data-var next-auction-id uint u1)
+(define-data-var next-rating-id uint u1)
 (define-data-var next-retirement-id uint u1)
+(define-data-var next-escrow-id uint u1)
+(define-data-var temp-buyer (optional principal) none)
 (define-data-var temp-purpose (string-ascii 128) "")
 (define-data-var temp-certificate (optional (string-ascii 64)) none)
 
@@ -199,8 +209,6 @@
         ))
     )
 )
-(define-data-var next-bundle-id uint u1)
-
 (define-map credit-bundles
     uint
     {
@@ -355,8 +363,6 @@
 (define-read-only (get-user-bundles (user principal))
     (ok (default-to (list) (map-get? bundle-ownership user)))
 )
-
-(define-data-var next-auction-id uint u1)
 
 (define-map credit-auctions
     uint
@@ -517,8 +523,6 @@
         false
     )
 )
-
-(define-data-var next-rating-id uint u1)
 
 (define-map credit-ratings
     uint
@@ -859,14 +863,6 @@
         false
     )
 )
-
-(define-constant err-escrow-not-found (err u111))
-(define-constant err-escrow-already-settled (err u112))
-(define-constant err-escrow-not-expired (err u113))
-(define-constant err-wrong-buyer (err u114))
-(define-constant err-wrong-seller (err u115))
-
-(define-data-var next-escrow-id uint u1)
 
 (define-map escrow-agreements
     uint
