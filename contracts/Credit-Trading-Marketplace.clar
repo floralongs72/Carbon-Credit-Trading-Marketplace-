@@ -1017,7 +1017,7 @@
 
 ;; Analytics data storage
 (define-map marketplace-analytics
-    uint  ;; period block height
+    uint ;; period block height
     {
         total-credits-issued: uint,
         total-credits-sold: uint,
@@ -1031,7 +1031,7 @@
 )
 
 (define-map daily-statistics
-    uint  ;; day (block height / 144)
+    uint ;; day (block height / 144)
     {
         credits-issued: uint,
         credits-traded: uint,
@@ -1044,12 +1044,12 @@
 )
 
 (define-map price-history
-    uint  ;; sequential price point ID
+    uint ;; sequential price point ID
     {
         credit-id: uint,
         price: uint,
         timestamp: uint,
-        transaction-type: uint,  ;; 1=direct sale, 2=auction, 3=bundle
+        transaction-type: uint, ;; 1=direct sale, 2=auction, 3=bundle
     }
 )
 
@@ -1060,7 +1060,7 @@
         total-credits-sold: uint,
         total-revenue: uint,
         average-sale-price: uint,
-        success-rate: uint,  ;; percentage
+        success-rate: uint, ;; percentage
         last-activity: uint,
     }
 )
@@ -1084,32 +1084,50 @@
 (define-data-var total-credits-ever-sold uint u0)
 
 ;; Update analytics when credits are issued
-(define-public (update-issuance-analytics (credit-id uint) (amount uint) (price uint))
+(define-public (update-issuance-analytics
+        (credit-id uint)
+        (amount uint)
+        (price uint)
+    )
     (begin
         (asserts! (is-some (map-get? carbon-credits credit-id)) err-not-found)
         (record-price-point credit-id price u1)
         (update-seller-analytics tx-sender amount price false)
         (update-daily-stats amount u0 u0)
-        (var-set total-credits-ever-issued (+ (var-get total-credits-ever-issued) u1))
+        (var-set total-credits-ever-issued
+            (+ (var-get total-credits-ever-issued) u1)
+        )
         (ok true)
     )
 )
 
 ;; Update analytics when credits are sold
-(define-public (update-sale-analytics (credit-id uint) (buyer principal) (price uint))
+(define-public (update-sale-analytics
+        (credit-id uint)
+        (buyer principal)
+        (price uint)
+    )
     (let ((credit (unwrap! (map-get? carbon-credits credit-id) err-not-found)))
         (record-price-point credit-id price u1)
-        (update-seller-analytics (get issuer credit) (get amount credit) price true)
+        (update-seller-analytics (get issuer credit) (get amount credit) price
+            true
+        )
         (update-buyer-analytics buyer price (get amount credit))
         (update-daily-stats u0 u1 price)
         (var-set total-credits-ever-sold (+ (var-get total-credits-ever-sold) u1))
-        (var-set total-marketplace-volume (+ (var-get total-marketplace-volume) price))
+        (var-set total-marketplace-volume
+            (+ (var-get total-marketplace-volume) price)
+        )
         (ok true)
     )
 )
 
 ;; Record price points for trend analysis
-(define-private (record-price-point (credit-id uint) (price uint) (tx-type uint))
+(define-private (record-price-point
+        (credit-id uint)
+        (price uint)
+        (tx-type uint)
+    )
     (let ((price-id (var-get next-price-point-id)))
         (map-set price-history price-id {
             credit-id: credit-id,
@@ -1123,7 +1141,12 @@
 )
 
 ;; Update seller performance metrics
-(define-private (update-seller-analytics (seller principal) (amount uint) (price uint) (sold bool))
+(define-private (update-seller-analytics
+        (seller principal)
+        (amount uint)
+        (price uint)
+        (sold bool)
+    )
     (let ((current (default-to {
             total-credits-issued: u0,
             total-credits-sold: u0,
@@ -1131,10 +1154,12 @@
             average-sale-price: u0,
             success-rate: u0,
             last-activity: u0,
-        } (map-get? seller-performance seller))))
+        }
+            (map-get? seller-performance seller)
+        )))
         (map-set seller-performance seller {
             total-credits-issued: (+ (get total-credits-issued current) u1),
-            total-credits-sold: (if sold 
+            total-credits-sold: (if sold
                 (+ (get total-credits-sold current) u1)
                 (get total-credits-sold current)
             ),
@@ -1143,13 +1168,16 @@
                 (get total-revenue current)
             ),
             average-sale-price: (if sold
-                (calculate-average-price (get total-revenue current) price (get total-credits-sold current))
+                (calculate-average-price (get total-revenue current) price
+                    (get total-credits-sold current)
+                )
                 (get average-sale-price current)
             ),
-            success-rate: (calculate-success-rate 
-                (+ (get total-credits-issued current) u1)
-                (if sold (+ (get total-credits-sold current) u1) (get total-credits-sold current))
-            ),
+            success-rate: (calculate-success-rate (+ (get total-credits-issued current) u1)
+                (if sold
+                    (+ (get total-credits-sold current) u1)
+                    (get total-credits-sold current)
+                )),
             last-activity: stacks-block-height,
         })
         true
@@ -1157,7 +1185,11 @@
 )
 
 ;; Update buyer analytics
-(define-private (update-buyer-analytics (buyer principal) (price uint) (amount uint))
+(define-private (update-buyer-analytics
+        (buyer principal)
+        (price uint)
+        (amount uint)
+    )
     (let ((current (default-to {
             total-purchases: u0,
             total-spent: u0,
@@ -1165,11 +1197,15 @@
             credits-retired: u0,
             co2-offset: u0,
             last-purchase: u0,
-        } (map-get? buyer-analytics buyer))))
+        }
+            (map-get? buyer-analytics buyer)
+        )))
         (map-set buyer-analytics buyer {
             total-purchases: (+ (get total-purchases current) u1),
             total-spent: (+ (get total-spent current) price),
-            average-purchase-price: (calculate-average-price (get total-spent current) price (get total-purchases current)),
+            average-purchase-price: (calculate-average-price (get total-spent current) price
+                (get total-purchases current)
+            ),
             credits-retired: (get credits-retired current),
             co2-offset: (get co2-offset current),
             last-purchase: stacks-block-height,
@@ -1179,8 +1215,13 @@
 )
 
 ;; Update daily statistics
-(define-private (update-daily-stats (issued uint) (traded uint) (volume uint))
-    (let ((day (/ stacks-block-height u144)))  ;; Approximate daily blocks
+(define-private (update-daily-stats
+        (issued uint)
+        (traded uint)
+        (volume uint)
+    )
+    (let ((day (/ stacks-block-height u144)))
+        ;; Approximate daily blocks
         (let ((current (default-to {
                 credits-issued: u0,
                 credits-traded: u0,
@@ -1189,18 +1230,28 @@
                 avg-price: u0,
                 highest-price: u0,
                 lowest-price: u999999999,
-            } (map-get? daily-statistics day))))
+            }
+                (map-get? daily-statistics day)
+            )))
             (map-set daily-statistics day {
                 credits-issued: (+ (get credits-issued current) issued),
                 credits-traded: (+ (get credits-traded current) traded),
                 volume-traded: (+ (get volume-traded current) volume),
                 unique-traders: (get unique-traders current),
                 avg-price: (if (> volume u0)
-                    (calculate-daily-avg-price (get volume-traded current) volume (get credits-traded current) traded)
+                    (calculate-daily-avg-price (get volume-traded current) volume
+                        (get credits-traded current) traded
+                    )
                     (get avg-price current)
                 ),
-                highest-price: (if (> volume (get highest-price current)) volume (get highest-price current)),
-                lowest-price: (if (and (> volume u0) (< volume (get lowest-price current))) volume (get lowest-price current)),
+                highest-price: (if (> volume (get highest-price current))
+                    volume
+                    (get highest-price current)
+                ),
+                lowest-price: (if (and (> volume u0) (< volume (get lowest-price current)))
+                    volume
+                    (get lowest-price current)
+                ),
             })
         )
         true
@@ -1208,23 +1259,37 @@
 )
 
 ;; Helper functions for calculations
-(define-private (calculate-average-price (current-total uint) (new-amount uint) (count uint))
+(define-private (calculate-average-price
+        (current-total uint)
+        (new-amount uint)
+        (count uint)
+    )
     (if (> count u0)
         (/ (+ current-total new-amount) count)
         u0
     )
 )
 
-(define-private (calculate-success-rate (total uint) (sold uint))
+(define-private (calculate-success-rate
+        (total uint)
+        (sold uint)
+    )
     (if (> total u0)
         (/ (* sold u100) total)
         u0
     )
 )
 
-(define-private (calculate-daily-avg-price (current-volume uint) (new-volume uint) (current-trades uint) (new-trades uint))
-    (let ((total-volume (+ current-volume new-volume))
-          (total-trades (+ current-trades new-trades)))
+(define-private (calculate-daily-avg-price
+        (current-volume uint)
+        (new-volume uint)
+        (current-trades uint)
+        (new-trades uint)
+    )
+    (let (
+            (total-volume (+ current-volume new-volume))
+            (total-trades (+ current-trades new-trades))
+        )
         (if (> total-trades u0)
             (/ total-volume total-trades)
             u0
@@ -1287,18 +1352,36 @@
     )
 )
 
-(define-private (get-price-points-range (start uint) (end uint))
+(define-private (get-price-points-range
+        (start uint)
+        (end uint)
+    )
     (let ((range-size (- end start)))
         (if (<= range-size u20)
-            (fold collect-price-point (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20) (list))
+            (fold collect-price-point
+                (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17
+                    u18 u19 u20)
+                (list)
+            )
             (list)
         )
     )
 )
 
-(define-private (collect-price-point (index uint) (collected (list 20 {credit-id: uint, price: uint, timestamp: uint, transaction-type: uint})))
-    (let ((current-id (var-get next-price-point-id))
-          (point-id (- current-id index)))
+(define-private (collect-price-point
+        (index uint)
+        (collected (list 20
+            {
+            credit-id: uint,
+            price: uint,
+            timestamp: uint,
+            transaction-type: uint,
+        }))
+    )
+    (let (
+            (current-id (var-get next-price-point-id))
+            (point-id (- current-id index))
+        )
         (if (> point-id u0)
             (match (map-get? price-history point-id)
                 point (unwrap-panic (as-max-len? (append collected point) u20))
@@ -1310,28 +1393,149 @@
 )
 
 (define-read-only (get-market-trends)
-    (let ((current-day (/ stacks-block-height u144))
-          (yesterday (- current-day u1)))
+    (let (
+            (current-day (/ stacks-block-height u144))
+            (yesterday (- current-day u1))
+        )
         (match (map-get? daily-statistics current-day)
-            today-stats
-                (match (map-get? daily-statistics yesterday)
-                    yesterday-stats (ok {
-                        today: today-stats,
-                        yesterday: yesterday-stats,
-                        volume-change: (if (> (get volume-traded yesterday-stats) u0)
-                            (/ (* (- (get volume-traded today-stats) (get volume-traded yesterday-stats)) u100)
-                               (get volume-traded yesterday-stats))
-                            u0
-                        ),
-                        price-change: (if (> (get avg-price yesterday-stats) u0)
-                            (/ (* (- (get avg-price today-stats) (get avg-price yesterday-stats)) u100)
-                               (get avg-price yesterday-stats))
-                            u0
-                        ),
-                    })
-                    err-not-found
-                )
+            today-stats (match (map-get? daily-statistics yesterday)
+                yesterday-stats (ok {
+                    today: today-stats,
+                    yesterday: yesterday-stats,
+                    volume-change: (if (> (get volume-traded yesterday-stats) u0)
+                        (/
+                            (*
+                                (- (get volume-traded today-stats)
+                                    (get volume-traded yesterday-stats)
+                                )
+                                u100
+                            )
+                            (get volume-traded yesterday-stats)
+                        )
+                        u0
+                    ),
+                    price-change: (if (> (get avg-price yesterday-stats) u0)
+                        (/
+                            (*
+                                (- (get avg-price today-stats)
+                                    (get avg-price yesterday-stats)
+                                )
+                                u100
+                            )
+                            (get avg-price yesterday-stats)
+                        )
+                        u0
+                    ),
+                })
+                err-not-found
+            )
             err-not-found
         )
+    )
+)
+
+(define-constant err-rfq-not-found (err u150))
+(define-constant err-rfq-not-open (err u151))
+(define-constant err-rfq-expired (err u152))
+(define-constant err-rfq-already-accepted (err u153))
+(define-constant err-rfq-invalid (err u154))
+
+(define-data-var next-rfq-id uint u1)
+
+(define-map rfqs
+    uint
+    {
+        requester: principal,
+        amount: uint,
+        max-price: uint,
+        created-block: uint,
+        expiry-block: uint,
+        status: uint,
+        accepted-by: (optional principal),
+        credit-id: (optional uint),
+    }
+)
+
+(define-read-only (get-rfq (rfq-id uint))
+    (match (map-get? rfqs rfq-id)
+        rfq (ok rfq)
+        err-rfq-not-found
+    )
+)
+
+(define-read-only (is-rfq-open (rfq-id uint))
+    (match (map-get? rfqs rfq-id)
+        rfq (and
+            (is-eq (get status rfq) u1)
+            (< stacks-block-height (get expiry-block rfq))
+        )
+        false
+    )
+)
+
+(define-public (create-rfq
+        (amount uint)
+        (max-price uint)
+        (duration uint)
+    )
+    (let ((rfq-id (var-get next-rfq-id)))
+        (asserts! (> amount u0) err-rfq-invalid)
+        (asserts! (> max-price u0) err-rfq-invalid)
+        (asserts! (> duration u0) err-rfq-invalid)
+        (map-set rfqs rfq-id {
+            requester: tx-sender,
+            amount: amount,
+            max-price: max-price,
+            created-block: stacks-block-height,
+            expiry-block: (+ stacks-block-height duration),
+            status: u1,
+            accepted-by: none,
+            credit-id: none,
+        })
+        (var-set next-rfq-id (+ rfq-id u1))
+        (ok rfq-id)
+    )
+)
+
+(define-public (cancel-rfq (rfq-id uint))
+    (let ((rfq (unwrap! (map-get? rfqs rfq-id) err-rfq-not-found)))
+        (asserts! (is-eq (get requester rfq) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status rfq) u1) err-rfq-not-open)
+        (map-set rfqs rfq-id (merge rfq { status: u3 }))
+        (ok true)
+    )
+)
+
+(define-public (accept-rfq
+        (rfq-id uint)
+        (credit-id uint)
+    )
+    (let (
+            (rfq (unwrap! (map-get? rfqs rfq-id) err-rfq-not-found))
+            (credit (unwrap! (map-get? carbon-credits credit-id) err-not-found))
+        )
+        (asserts! (is-eq (get status rfq) u1) err-rfq-not-open)
+        (asserts! (< stacks-block-height (get expiry-block rfq)) err-rfq-expired)
+        (asserts! (is-eq (get issuer credit) tx-sender) err-unauthorized)
+        (asserts! (is-none (get buyer credit)) err-already-exists)
+        (asserts! (not (get transferred credit)) err-already-exists)
+        (asserts! (not (get retired credit)) err-already-retired)
+        (asserts! (not (is-credit-expired credit-id)) err-expired)
+        (asserts! (>= (get amount credit) (get amount rfq)) err-rfq-invalid)
+        (asserts! (<= (get price credit) (get max-price rfq)) err-rfq-invalid)
+        (map-set carbon-credits credit-id
+            (merge credit {
+                buyer: (some (get requester rfq)),
+                transferred: true,
+            })
+        )
+        (map-set rfqs rfq-id
+            (merge rfq {
+                status: u2,
+                accepted-by: (some tx-sender),
+                credit-id: (some credit-id),
+            })
+        )
+        (ok true)
     )
 )
